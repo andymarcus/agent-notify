@@ -26,11 +26,11 @@ object AttachmentCrypto {
         ensureKeyPair()
         val store = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
         val privateKey = store.getKey(KEY_ALIAS, null)
-        val rsa = Cipher.getInstance("RSA/ECB/OAEPWithSHA-256AndMGF1Padding")
+        val rsa = Cipher.getInstance("RSA/ECB/OAEPPadding")
         rsa.init(
             Cipher.DECRYPT_MODE,
             privateKey,
-            OAEPParameterSpec("SHA-256", "MGF1", MGF1ParameterSpec.SHA256, PSource.PSpecified.DEFAULT),
+            OAEPParameterSpec("SHA-256", "MGF1", MGF1ParameterSpec.SHA1, PSource.PSpecified.DEFAULT),
         )
         val aesKey = rsa.doFinal(Base64.decode(wrappedKey, Base64.DEFAULT))
         val aes = Cipher.getInstance("AES/GCM/NoPadding")

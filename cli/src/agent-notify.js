@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { enqueueAndWait } from "./queue.js";
 
-export const VERSION = "1.2.0";
+export const VERSION = "1.2.1";
 export const MAX_ATTACHMENT_BYTES = 50 * 1024 * 1024;
 const SIGNED_URL_SECONDS = 7 * 24 * 60 * 60;
 const GOOGLE_SCOPES = [
@@ -221,7 +221,12 @@ export function encryptAttachment(filePath, publicKeyBase64) {
   const ciphertext = Buffer.concat([cipher.update(plaintext), cipher.final(), cipher.getAuthTag()]);
   let wrappedKey;
   try {
-    wrappedKey = crypto.publicEncrypt({ key: Buffer.from(publicKeyBase64.replace(/\s/g, ""), "base64"), format: "der", type: "spki", oaepHash: "sha256" }, key);
+    const publicKey = crypto.createPublicKey({
+      key: Buffer.from(publicKeyBase64.replace(/\s/g, ""), "base64"),
+      format: "der",
+      type: "spki",
+    });
+    wrappedKey = wrapKeyForAndroid(publicKey, key);
   } catch (error) { throw new CLIError(`Invalid Android file key: ${error.message}`); }
   return {
     ciphertext,
@@ -230,6 +235,40 @@ export function encryptAttachment(filePath, publicKeyBase64) {
     sha256: crypto.createHash("sha256").update(plaintext).digest("hex"),
     size: plaintext.length,
   };
+}
+
+// Android Keystore uses SHA-1 for OAEP's MGF1 digest unless a key created on
+// API 35+ opts into another digest. Node/OpenSSL does not expose a separate
+// MGF1 selector, so encode OAEP explicitly and perform only the raw RSA step.
+export function wrapKeyForAndroid(publicKey, message, randomBytes = crypto.randomBytes) {
+  const details = publicKey.asymmetricKeyDetails;
+  const modulusBytes = Math.ceil((details?.modulusLength ?? 2048) / 8);
+  const hashLength = 32;
+  if (message.length > modulusBytes - (2 * hashLength) - 2) throw new CLIError("Encryption key is too large for the Android RSA key.");
+  const labelHash = crypto.createHash("sha256").update(Buffer.alloc(0)).digest();
+  const padding = Buffer.alloc(modulusBytes - message.length - (2 * hashLength) - 2);
+  const dataBlock = Buffer.concat([labelHash, padding, Buffer.from([1]), message]);
+  const seed = randomBytes(hashLength);
+  const maskedDataBlock = xorBuffers(dataBlock, mgf1(seed, dataBlock.length, "sha1"));
+  const maskedSeed = xorBuffers(seed, mgf1(maskedDataBlock, hashLength, "sha1"));
+  const encoded = Buffer.concat([Buffer.from([0]), maskedSeed, maskedDataBlock]);
+  return crypto.publicEncrypt({ key: publicKey, padding: crypto.constants.RSA_NO_PADDING }, encoded);
+}
+
+function mgf1(seed, length, algorithm) {
+  const chunks = [];
+  for (let counter = 0; Buffer.concat(chunks).length < length; counter += 1) {
+    const value = Buffer.alloc(4);
+    value.writeUInt32BE(counter);
+    chunks.push(crypto.createHash(algorithm).update(seed).update(value).digest());
+  }
+  return Buffer.concat(chunks).subarray(0, length);
+}
+
+function xorBuffers(left, right) {
+  const output = Buffer.alloc(left.length);
+  for (let index = 0; index < left.length; index += 1) output[index] = left[index] ^ right[index];
+  return output;
 }
 
 function rfc3986(value) {
@@ -277,8 +316,8 @@ export async function sendMessage(config, topic, body, fetch_ = fetch, now = new
   const data = { topic, body, sent_at: String(now.getTime()) };
   if (attachment) Object.assign(data, {
     attachment_id: attachment.id, attachment_name: attachment.name, attachment_mime: attachment.mime,
-    attachment_size: String(attachment.size), attachment_url: attachment.url, attachment_key: attachment.key,
-    attachment_iv: attachment.iv, attachment_sha256: attachment.sha256,
+      attachment_size: String(attachment.size), attachment_url: attachment.url, attachment_key: attachment.key,
+      attachment_key_alg: "RSA-OAEP-256-MGF1-SHA1", attachment_iv: attachment.iv, attachment_sha256: attachment.sha256,
   });
   if (Buffer.byteLength(JSON.stringify(data), "utf8") > 4000) throw new CLIError("Message metadata is too large for Firebase Cloud Messaging.");
   const payload = { message: { token: config.deviceToken, data, android: { priority: "high", ttl: "604800s" } } };

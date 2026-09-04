@@ -80,13 +80,46 @@ test("encrypts attachments for the Android RSA key", () => {
   const { publicKey, privateKey } = crypto.generateKeyPairSync("rsa", { modulusLength: 2048 });
   const publicKeyBase64 = publicKey.export({ format: "der", type: "spki" }).toString("base64");
   const encrypted = encryptAttachment(file, publicKeyBase64);
-  const key = crypto.privateDecrypt({ key: privateKey, oaepHash: "sha256" }, Buffer.from(encrypted.key, "base64"));
+  const encodedKey = crypto.privateDecrypt(
+    { key: privateKey, padding: crypto.constants.RSA_NO_PADDING },
+    Buffer.from(encrypted.key, "base64"),
+  );
+  const key = decodeAndroidOaep(encodedKey);
   const bytes = encrypted.ciphertext.subarray(0, -16);
   const tag = encrypted.ciphertext.subarray(-16);
   const decipher = crypto.createDecipheriv("aes-256-gcm", key, Buffer.from(encrypted.iv, "base64"));
   decipher.setAuthTag(tag);
   assert.equal(Buffer.concat([decipher.update(bytes), decipher.final()]).toString(), "hello attachment");
 });
+
+function decodeAndroidOaep(encoded) {
+  const hashLength = 32;
+  assert.equal(encoded[0], 0);
+  const maskedSeed = encoded.subarray(1, 1 + hashLength);
+  const maskedData = encoded.subarray(1 + hashLength);
+  const seed = xor(maskedSeed, mgf(maskedData, hashLength));
+  const data = xor(maskedData, mgf(seed, maskedData.length));
+  const expectedLabel = crypto.createHash("sha256").update(Buffer.alloc(0)).digest();
+  assert.deepEqual(data.subarray(0, hashLength), expectedLabel);
+  const separator = data.indexOf(1, hashLength);
+  assert.ok(separator > hashLength);
+  assert.ok(data.subarray(hashLength, separator).every((byte) => byte === 0));
+  return data.subarray(separator + 1);
+}
+
+function mgf(seed, length) {
+  const chunks = [];
+  for (let counter = 0; Buffer.concat(chunks).length < length; counter += 1) {
+    const value = Buffer.alloc(4);
+    value.writeUInt32BE(counter);
+    chunks.push(crypto.createHash("sha1").update(seed).update(value).digest());
+  }
+  return Buffer.concat(chunks).subarray(0, length);
+}
+
+function xor(left, right) {
+  return Buffer.from(left.map((byte, index) => byte ^ right[index]));
+}
 
 test("creates a seven-day V4 signed URL", () => {
   const { privateKey } = crypto.generateKeyPairSync("rsa", { modulusLength: 2048 });
