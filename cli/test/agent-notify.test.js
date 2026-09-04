@@ -6,6 +6,7 @@ import path from "node:path";
 import test from "node:test";
 
 import { configure, createSignedURL, encryptAttachment, fetchOrThrow, isConnectivityError, loadConfig, parseArguments, run } from "../src/agent-notify.js";
+import { enqueueAndWait, listRequests, writeResult } from "../src/queue.js";
 
 test("parses documented long flags", () => {
   assert.deepEqual(
@@ -174,4 +175,24 @@ test("network failures fall back to the background sender", async () => {
 test("recognizes sandbox connectivity errors", () => {
   assert.equal(isConnectivityError({ code: "ENOTFOUND" }), true);
   assert.equal(isConnectivityError({ code: "EACCES" }), false);
+});
+
+test("copies queued attachments into the private worker queue", async () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "agent-notify-queue-"));
+  const source = path.join(directory, "source.txt");
+  fs.writeFileSync(source, "queued attachment");
+  const watcher = setInterval(() => {
+    const requestPath = listRequests(directory)[0];
+    if (!requestPath) return;
+    clearInterval(watcher);
+    const request = JSON.parse(fs.readFileSync(requestPath, "utf8"));
+    assert.notEqual(request.attachmentPath, source);
+    assert.equal(fs.readFileSync(request.attachmentPath, "utf8"), "queued attachment");
+    assert.equal(fs.statSync(request.attachmentPath).mode & 0o777, 0o600);
+    fs.unlinkSync(request.attachmentPath);
+    writeResult(requestPath, { ok: true, name: "projects/test/messages/queued" });
+    fs.unlinkSync(requestPath);
+  }, 10);
+  const result = await enqueueAndWait("test", "body", { directory, attachmentPath: source, timeoutMs: 2_000 });
+  assert.equal(result.name, "projects/test/messages/queued");
 });

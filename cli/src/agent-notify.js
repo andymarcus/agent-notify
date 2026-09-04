@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { enqueueAndWait } from "./queue.js";
 
-export const VERSION = "1.2.1";
+export const VERSION = "1.2.2";
 export const MAX_ATTACHMENT_BYTES = 50 * 1024 * 1024;
 const SIGNED_URL_SECONDS = 7 * 24 * 60 * 60;
 const GOOGLE_SCOPES = [

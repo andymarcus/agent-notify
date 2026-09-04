@@ -45,6 +45,9 @@ async function processQueue() {
           code: error?.code,
         });
       } finally {
+        if (request?.deleteAttachmentAfterSend && request.attachmentPath) {
+          try { fs.unlinkSync(request.attachmentPath); } catch {}
+        }
         try { fs.unlinkSync(requestPath); } catch {}
       }
     }

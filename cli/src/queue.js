@@ -22,9 +22,22 @@ export async function enqueueAndWait(topic, body, options = {}) {
   const requestPath = path.join(directory, `${id}.request.json`);
   const temporaryPath = `${requestPath}.tmp`;
   const resultPath = path.join(directory, `${id}.result.json`);
+  let queuedAttachmentPath;
+  if (options.attachmentPath) {
+    queuedAttachmentPath = path.join(directory, `${id}.attachment`);
+    fs.copyFileSync(options.attachmentPath, queuedAttachmentPath);
+    fs.chmodSync(queuedAttachmentPath, 0o600);
+  }
   fs.writeFileSync(
     temporaryPath,
-    `${JSON.stringify({ id, topic, body, attachmentPath: options.attachmentPath, createdAt: Date.now() })}\n`,
+    `${JSON.stringify({
+      id,
+      topic,
+      body,
+      attachmentPath: queuedAttachmentPath,
+      deleteAttachmentAfterSend: Boolean(queuedAttachmentPath),
+      createdAt: Date.now(),
+    })}\n`,
     { mode: 0o600 },
   );
   fs.renameSync(temporaryPath, requestPath);
