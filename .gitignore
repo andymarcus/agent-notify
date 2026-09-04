@@ -1,0 +1,11 @@
+.DS_Store
+.idea/
+.gradle/
+**/build/
+android/local.properties
+android/app/google-services.json
+**/*firebase-adminsdk*.json
+**/*service-account*.json
+cli/.build/
+cli/node_modules/
+*.swp
