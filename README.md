@@ -1,6 +1,6 @@
 # Agent Notify
 
-Agent Notify lets a macOS CLI send topic-grouped text or Markdown notifications to a single Android device through Firebase Cloud Messaging (FCM). There is no custom application server.
+Agent Notify lets a macOS CLI send topic-grouped text, Markdown, and encrypted file attachments to a single Android device through Firebase. There is no custom application server.
 
 ## Repository layout
 
@@ -11,7 +11,7 @@ Agent Notify lets a macOS CLI send topic-grouped text or Markdown notifications 
 
 The Android app obtains an FCM registration token and displays it on the Settings screen. The CLI stores that token, the Firebase project ID, and the path to a Firebase service-account key. For each message, the CLI obtains a short-lived OAuth token and sends an FCM HTTP v1 data message. The Android app stores the message in its private SQLite database and posts a system notification.
 
-FCM is the only hosted transport. Message history remains on the phone. The service-account key remains on the Mac.
+FCM carries messages and attachment metadata. Firebase Storage temporarily holds encrypted attachment bytes. Message history and downloaded files remain on the phone; the service-account key remains on the Mac.
 
 ## Firebase setup
 
@@ -20,6 +20,7 @@ FCM is the only hosted transport. Message history remains on the phone. The serv
 3. Download `google-services.json` into `android/app/google-services.json`.
 4. In Google Cloud Console, ensure the **Firebase Cloud Messaging API (V1)** is enabled.
 5. Create a service account with permission to send FCM messages (the Firebase Admin SDK administrator role is convenient for a private project), download its JSON key, and keep it somewhere private on the Mac.
+6. Upgrade the project to Blaze, enable Firebase Storage in production mode, and keep the bucket private. The service account needs permission to create Storage objects.
 
 Do not commit either credential file. The Android Firebase config contains project identifiers rather than a server secret, but it is ignored to prevent accidentally coupling this source tree to one Firebase project. The service-account JSON is sensitive and must never be copied into this repository or onto the phone.
 
@@ -32,6 +33,7 @@ Requirements: current Android Studio, Android SDK 37, and an Android 6.0+ phone 
 3. Connect the phone and run the `app` configuration.
 4. Grant notification permission when prompted.
 5. Open **Settings**, wait for the FCM token, and tap **Copy token**.
+6. In the same screen, tap **Copy file key**. This is a public encryption key; its private counterpart never leaves Android Keystore.
 
 From a configured command line, `cd android && ./gradlew assembleDebug` produces the debug APK.
 
@@ -51,7 +53,8 @@ npm link
 
 agent-notify configure \
   --service-account "/absolute/path/to/service-account.json" \
-  --token "token-copied-from-the-android-app"
+  --token "token-copied-from-the-android-app" \
+  --public-key "file-key-copied-from-the-android-app"
 ```
 
 Node.js 18 or newer is required. The Firebase project ID is read from the service-account file automatically; `--project-id` remains available as an override.
@@ -70,10 +73,14 @@ agent-notify --topic "review" --message $'## Review ready\n\n- 3 files changed\n
 agent-notify --topic "report" --message-file report.md
 
 printf '**Done** at %s' "$(date)" | agent-notify --topic build --message-file -
+
+agent-notify --topic "reports" --message "Report attached" --file "/absolute/path/to/report.pdf"
+
+agent-notify --topic "exports" --file "/absolute/path/to/export.zip"
 ```
 
-Single-dash spellings such as `-topic` and `-message` are accepted as aliases. Run `agent-notify --help` for all options.
+One attachment up to 50 MiB is supported per message. The CLI encrypts it before upload, and the app downloads it only after **Download** is tapped. Signed links expire after seven days. Single-dash spellings such as `-topic` and `-message` are accepted as aliases. Run `agent-notify --help` for all options.
 
 ## Security notes
 
-There is no user account or login. Possession of the service-account key authorizes sending, and possession of the device token identifies the destination. Keep both private. If the key is exposed, revoke it in Google Cloud immediately. If the phone's token changes, copy the new token and run `configure --token ...`; other existing settings are retained.
+There is no user account or login. Possession of the service-account key authorizes sending, and possession of the device token identifies the destination. Keep both private. Attachments use a fresh AES-256-GCM key; that key is wrapped to the phone's RSA key before it is placed in FCM metadata, so Firebase Storage receives only ciphertext. If the service-account key is exposed, revoke it in Google Cloud immediately. If the phone's token or file key changes, rerun `configure` with the new value; other existing settings are retained.

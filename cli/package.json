@@ -1,6 +1,6 @@
 {
   "name": "agent-notify",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Send topic-grouped notifications to the Agent Notify Android app",
   "type": "module",
   "bin": {

@@ -1,6 +1,6 @@
 ---
 name: agent-notify
-description: Send topic-grouped text or Markdown notifications to the user's Android phone with the installed agent-notify CLI. Use when the user explicitly asks a Codex task, scheduled task, automation, or agent workflow to notify them through agent-notify. Do not invoke merely because a task completes.
+description: Send topic-grouped text, Markdown, or encrypted file notifications to the user's Android phone with the installed agent-notify CLI. Use when the user explicitly asks a Codex task, scheduled task, automation, or agent workflow to notify them through agent-notify. Do not invoke merely because a task completes.
 ---
 
 # Agent Notify
@@ -19,11 +19,17 @@ Send only when the user's request authorizes a notification. For a scheduled or 
 
 For complex multiline Markdown, piping content to `--message-file -` is supported. A UTF-8 file with `--message-file` is also appropriate when the content already exists as an artifact.
 
+When the user explicitly asks to send an artifact or file, attach one file up to 50 MiB with `--file`. Always use an absolute path. The file is encrypted before Firebase Storage upload and must be accepted with **Download** in the Android app.
+
+```sh
+/opt/homebrew/bin/agent-notify --topic "reports" --message "Report attached" --file "/absolute/path/to/report.pdf"
+```
+
 Both plain text and Markdown are supported. Keep phone notifications concise and useful. A good completion message states the outcome first and may add a short Markdown list of essential results. Firebase data payloads are limited to roughly 4 KB, so link to or name a larger artifact instead of embedding it.
 
 Use the user's exact topic when supplied. Otherwise choose a short, stable topic derived from the recurring task or workflow name so related messages group together; do not invent a new timestamped topic for every run.
 
-For content already stored in a UTF-8 Markdown file, use:
+For content already stored in a UTF-8 Markdown file without attaching that Markdown file, use:
 
 ```sh
 /opt/homebrew/bin/agent-notify --topic "review" --message-file "/absolute/path/to/summary.md"

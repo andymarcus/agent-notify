@@ -24,14 +24,18 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.Download
+import androidx.compose.material.icons.outlined.InsertDriveFile
 import androidx.compose.material.icons.outlined.MarkEmailUnread
 import androidx.compose.material.icons.outlined.Notifications
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Card
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -70,6 +74,9 @@ fun AgentNotifyScreen(
     repository: MessageRepository,
     tokenProvider: (((String) -> Unit) -> Unit),
     copyToken: (String) -> Unit,
+    fileKeyProvider: () -> String,
+    copyFileKey: (String) -> Unit,
+    openAttachment: (String, String?) -> Unit,
 ) {
     val messages by repository.messages.collectAsState()
     var selectedTopic by remember { mutableStateOf<String?>(null) }
@@ -149,6 +156,8 @@ fun AgentNotifyScreen(
                             },
                             onDeleteRequested = { pendingDeletion = message },
                             onMarkUnread = { repository.markUnread(message.id) },
+                            onDownload = { repository.downloadAttachment(message.id) },
+                            onOpenAttachment = { path, mime -> openAttachment(path, mime) },
                         )
                     }
                 }
@@ -158,7 +167,11 @@ fun AgentNotifyScreen(
 
     if (showSettings) {
         var token by remember { mutableStateOf("") }
-        LaunchedEffect(Unit) { tokenProvider { token = it } }
+        var fileKey by remember { mutableStateOf("") }
+        LaunchedEffect(Unit) {
+            tokenProvider { token = it }
+            fileKey = fileKeyProvider()
+        }
         ModalBottomSheet(onDismissRequest = { showSettings = false }) {
             Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp).padding(bottom = 40.dp)) {
                 Text("Connect the CLI", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
@@ -177,6 +190,17 @@ fun AgentNotifyScreen(
                     onClick = { copyToken(token) },
                     enabled = token.isNotBlank(),
                     label = { Text("Copy token") },
+                    leadingIcon = { Icon(Icons.Outlined.ContentCopy, contentDescription = null) },
+                )
+                Spacer(Modifier.height(24.dp))
+                Text("Encrypted file transfer", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                Spacer(Modifier.height(6.dp))
+                Text("Copy this public key and add it to the CLI. The private key never leaves this phone.")
+                Spacer(Modifier.height(12.dp))
+                AssistChip(
+                    onClick = { copyFileKey(fileKey) },
+                    enabled = fileKey.isNotBlank(),
+                    label = { Text("Copy file key") },
                     leadingIcon = { Icon(Icons.Outlined.ContentCopy, contentDescription = null) },
                 )
             }
@@ -225,6 +249,8 @@ private fun SwipeableMessage(
     onLongClick: () -> Unit,
     onDeleteRequested: () -> Unit,
     onMarkUnread: () -> Unit,
+    onDownload: () -> Unit,
+    onOpenAttachment: (String, String?) -> Unit,
 ) {
     val dismissState = rememberSwipeToDismissBoxState(
         confirmValueChange = { value ->
@@ -260,6 +286,8 @@ private fun SwipeableMessage(
                 isExpanded = isExpanded,
                 onClick = onClick,
                 onLongClick = onLongClick,
+                onDownload = onDownload,
+                onOpenAttachment = onOpenAttachment,
             )
         },
     )
@@ -284,6 +312,8 @@ private fun MessageCard(
     isExpanded: Boolean,
     onClick: () -> Unit,
     onLongClick: () -> Unit,
+    onDownload: () -> Unit,
+    onOpenAttachment: (String, String?) -> Unit,
 ) {
     val displayedBody = remember(message.body, isExpanded) {
         if (isExpanded) message.body else collapsedBody(message.body)
@@ -331,8 +361,49 @@ private fun MessageCard(
                     style = MaterialTheme.typography.labelMedium,
                 )
             }
+            if (message.attachmentId != null) {
+                Spacer(Modifier.height(12.dp))
+                AttachmentCard(message, onDownload, onOpenAttachment)
+            }
         }
     }
+}
+
+@Composable
+private fun AttachmentCard(
+    message: AgentMessage,
+    onDownload: () -> Unit,
+    onOpenAttachment: (String, String?) -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth().background(MaterialTheme.colorScheme.surfaceVariant).padding(12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Icon(Icons.Outlined.InsertDriveFile, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+        Column(Modifier.weight(1f)) {
+            Text(message.attachmentName ?: "Attachment", fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text(formatBytes(message.attachmentSize ?: 0), style = MaterialTheme.typography.labelSmall)
+            message.attachmentError?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelSmall, maxLines = 2) }
+        }
+        when (message.attachmentStatus) {
+            "downloading" -> CircularProgressIndicator(Modifier.size(26.dp), strokeWidth = 3.dp)
+            "ready" -> FilledTonalButton(onClick = {
+                message.attachmentPath?.let { onOpenAttachment(it, message.attachmentMime) }
+            }) { Text("Open") }
+            else -> FilledTonalButton(onClick = onDownload) {
+                Icon(Icons.Outlined.Download, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.size(6.dp))
+                Text(if (message.attachmentStatus == "failed") "Retry" else "Download")
+            }
+        }
+    }
+}
+
+private fun formatBytes(bytes: Long): String = when {
+    bytes >= 1024 * 1024 -> String.format("%.1f MB", bytes / (1024.0 * 1024.0))
+    bytes >= 1024 -> String.format("%.1f KB", bytes / 1024.0)
+    else -> "$bytes bytes"
 }
 
 private fun isLongMessage(body: String): Boolean =

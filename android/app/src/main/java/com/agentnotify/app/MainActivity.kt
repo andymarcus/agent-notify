@@ -5,6 +5,10 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.pm.PackageManager
+import android.content.Intent
+import androidx.core.content.FileProvider
+import com.agentnotify.app.crypto.AttachmentCrypto
+import java.io.File
 import android.os.Build
 import android.os.Bundle
 import android.widget.Toast
@@ -48,6 +52,9 @@ class MainActivity : ComponentActivity() {
                             repository = (application as AgentNotifyApplication).repository,
                             tokenProvider = { callback -> loadToken(callback) },
                             copyToken = ::copyToken,
+                            fileKeyProvider = { AttachmentCrypto.publicKeyBase64() },
+                            copyFileKey = ::copyFileKey,
+                            openAttachment = ::openAttachment,
                         )
                     }
                 }
@@ -77,5 +84,25 @@ class MainActivity : ComponentActivity() {
         clipboard.setPrimaryClip(ClipData.newPlainText("FCM device token", token))
         Toast.makeText(this, "Device token copied", Toast.LENGTH_SHORT).show()
     }
-}
 
+    private fun copyFileKey(key: String) {
+        val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+        clipboard.setPrimaryClip(ClipData.newPlainText("Agent Notify file key", key))
+        Toast.makeText(this, "File key copied", Toast.LENGTH_SHORT).show()
+    }
+
+    private fun openAttachment(path: String, mime: String?) {
+        val file = File(path)
+        if (!file.exists()) {
+            Toast.makeText(this, "Downloaded file is missing", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val uri = FileProvider.getUriForFile(this, "$packageName.files", file)
+        val intent = Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(uri, mime ?: "application/octet-stream")
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        runCatching { startActivity(Intent.createChooser(intent, "Open attachment")) }
+            .onFailure { Toast.makeText(this, "No app can open this file", Toast.LENGTH_SHORT).show() }
+    }
+}

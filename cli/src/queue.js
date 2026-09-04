@@ -24,7 +24,7 @@ export async function enqueueAndWait(topic, body, options = {}) {
   const resultPath = path.join(directory, `${id}.result.json`);
   fs.writeFileSync(
     temporaryPath,
-    `${JSON.stringify({ id, topic, body, createdAt: Date.now() })}\n`,
+    `${JSON.stringify({ id, topic, body, attachmentPath: options.attachmentPath, createdAt: Date.now() })}\n`,
     { mode: 0o600 },
   );
   fs.renameSync(temporaryPath, requestPath);

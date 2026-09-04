@@ -1,4 +1,4 @@
 interface:
   display_name: "Agent Notify"
-  short_description: "Send Android notifications from Codex tasks"
+  short_description: "Send Android messages and encrypted files"
   default_prompt: "Use $agent-notify to notify me when this task finishes."

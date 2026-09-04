@@ -27,7 +27,7 @@ async function processQueue() {
         let lastError;
         for (let attempt = 1; attempt <= 2; attempt += 1) {
           try {
-            result = await sendMessage(loadConfig(defaultConfigPath()), request.topic, request.body);
+            result = await sendMessage(loadConfig(defaultConfigPath()), request.topic, request.body, fetch, new Date(), request.attachmentPath);
             break;
           } catch (error) {
             lastError = error;
