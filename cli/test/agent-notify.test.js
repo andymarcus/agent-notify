@@ -7,12 +7,42 @@ import test from "node:test";
 
 import { configure, createSignedURL, encryptAttachment, fetchOrThrow, isConnectivityError, loadConfig, parseArguments, run } from "../src/agent-notify.js";
 import { enqueueAndWait, listRequests, writeResult } from "../src/queue.js";
+import { installSkills, skillInstallTargets } from "../scripts/install-skills.js";
 
 test("parses documented long flags", () => {
   assert.deepEqual(
     parseArguments(["--topic", "daily brief", "--message", "**Done**"]),
     { command: "send", topic: "daily brief", message: "**Done**", attachmentPath: undefined, dryRun: false },
   );
+});
+
+test("uses user-level Codex and Claude skill directories", () => {
+  const homeDirectory = path.join(os.tmpdir(), "agent-notify-home");
+  assert.deepEqual(skillInstallTargets({ homeDirectory, environment: {} }), [
+    { agent: "Codex", path: path.join(homeDirectory, ".codex", "skills", "agent-notify") },
+    { agent: "Claude", path: path.join(homeDirectory, ".claude", "skills", "agent-notify") },
+  ]);
+
+  const codexHome = path.join(os.tmpdir(), "custom-codex-home");
+  assert.equal(
+    skillInstallTargets({ homeDirectory, environment: { CODEX_HOME: codexHome } })[0].path,
+    path.join(codexHome, "skills", "agent-notify"),
+  );
+});
+
+test("installs the bundled skill for Codex and Claude", () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "agent-notify-skills-"));
+  const sourceDirectory = path.join(directory, "source");
+  const homeDirectory = path.join(directory, "home");
+  fs.mkdirSync(path.join(sourceDirectory, "agents"), { recursive: true });
+  fs.writeFileSync(path.join(sourceDirectory, "SKILL.md"), "---\nname: agent-notify\ndescription: Test skill.\n---\n");
+  fs.writeFileSync(path.join(sourceDirectory, "agents", "openai.yaml"), "interface: {}\n");
+
+  const targets = installSkills({ sourceDirectory, homeDirectory, environment: {}, output: () => {} });
+  for (const target of targets) {
+    assert.equal(fs.readFileSync(path.join(target.path, "SKILL.md"), "utf8"), "---\nname: agent-notify\ndescription: Test skill.\n---\n");
+    assert.equal(fs.readFileSync(path.join(target.path, "agents", "openai.yaml"), "utf8"), "interface: {}\n");
+  }
 });
 
 test("parses single-dash aliases and dry run", () => {
