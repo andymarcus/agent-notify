@@ -29,7 +29,7 @@ Agent Notify sends topic-grouped text, Markdown, and encrypted file attachments 
 
 - `android/` — Kotlin and Jetpack Compose Android receiver.
 - `cli/` — dependency-free Node.js macOS sender.
-- `codex-skill/agent-notify/` — reusable Codex skill for sending notifications from tasks and automations.
+- `cli/skills/agent-notify/` — packaged agent skill for sending notifications from Codex and Claude tasks and automations.
 
 ## Architecture
 
@@ -321,18 +321,21 @@ Whenever CLI code is updated, repeat the runtime copy commands and restart the a
 launchctl kickstart -k "gui/$(id -u)/com.agentnotify.sender"
 ```
 
-## 7. Install the Codex skill
+## 7. Agent skills
 
-Copy the included skill into the global Codex skills directory:
+Installing or linking the CLI automatically installs its bundled skill at user scope for both supported agents:
+
+- Codex: `${CODEX_HOME:-$HOME/.codex}/skills/agent-notify/`
+- Claude: `$HOME/.claude/skills/agent-notify/`
+
+These locations make the skill available across all projects. If npm lifecycle scripts were disabled during installation, install or refresh both copies manually:
 
 ```sh
-mkdir -p "$HOME/.codex/skills/agent-notify/agents"
-cp codex-skill/agent-notify/SKILL.md "$HOME/.codex/skills/agent-notify/SKILL.md"
-cp codex-skill/agent-notify/agents/openai.yaml \
-  "$HOME/.codex/skills/agent-notify/agents/openai.yaml"
+cd cli
+npm run install-skills
 ```
 
-Codex can then use `agent-notify` when explicitly asked by a task or automation to send a phone notification or attachment.
+Codex can invoke the skill as `$agent-notify`; Claude Code can invoke it as `/agent-notify`. Both agents may also select it automatically when the request matches its description, but the skill sends a notification only when the user explicitly asks for one.
 
 ## 8. Use another Mac
 
@@ -343,7 +346,7 @@ On each additional Mac:
 3. Securely place a copy of the Firebase Admin service-account JSON outside the repository.
 4. Run `agent-notify configure` with the current phone token and public file key.
 5. Install the LaunchAgent if sandboxed scheduled tasks will send notifications.
-6. Install the Codex skill if Codex should know how to invoke the CLI.
+6. Confirm that the automatically installed skill appears in Codex or Claude Code.
 
 The service-account JSON, FCM token, and local CLI config are intentionally absent from GitHub.
 

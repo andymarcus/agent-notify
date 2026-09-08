@@ -7,7 +7,16 @@
     "agent-notify": "bin/agent-notify.js",
     "agent-notify-worker": "bin/agent-notify-worker.js"
   },
+  "files": [
+    "bin/",
+    "launchd/",
+    "scripts/install-skills.js",
+    "skills/",
+    "src/"
+  ],
   "scripts": {
+    "postinstall": "node scripts/install-skills.js",
+    "install-skills": "node scripts/install-skills.js",
     "test": "node --test"
   },
   "engines": {
