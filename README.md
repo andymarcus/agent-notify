@@ -244,6 +244,36 @@ cat <<'EOF' | agent-notify --topic "daily brief" --message-file -
 EOF
 ```
 
+### Supported Markdown
+
+The Android app renders message bodies with CommonMark 0.31.2 block and inline
+structure, plus the GitHub Flavored Markdown extensions for tables,
+strikethrough, task list items and bare (`https://`, `www.`) autolinks:
+
+| Feature | Notes |
+| :------ | :---- |
+| Headings | ATX (`#`..`######`) and setext (`===`, `---`) |
+| Emphasis | `*em*`, `_em_`, `**strong**`, `~~strikethrough~~` |
+| Lists | Bullet and ordered, nested, tight/loose, `- [x]` task items |
+| Links | Inline, reference (`[a][b]`), `<autolinks>` and bare URLs |
+| Images | Shown as a tappable label, not downloaded |
+| Code | Fenced (``` / ~~~) with info string, 4-space indented, inline spans |
+| Tables | Column alignment honoured; wide tables scroll horizontally |
+| Other | Block quotes (incl. nesting), thematic breaks, hard line breaks, backslash escapes |
+
+Deliberately not supported:
+
+- Raw HTML blocks and inline HTML, and HTML entities (`&amp;`) — kept literal.
+- Multi-line link reference definitions, and definitions inside a block quote or
+  list item. Definitions must be one per line at the top level of the message.
+- Footnotes, front matter and heading anchors.
+- Bare email autolinks; use `<someone@example.com>`.
+- Remote images are never fetched. Image syntax renders as a tappable label that
+  opens the image URL in the browser.
+- Only `http`, `https`, `mailto` and `tel` links are tappable. Any other
+  destination (relative paths, `javascript:`, `intent:`, custom schemes) renders
+  as plain text so a message body cannot launch arbitrary intents.
+
 ### File attachment with a message
 
 ```sh

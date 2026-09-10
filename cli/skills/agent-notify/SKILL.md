@@ -25,7 +25,7 @@ When the user explicitly asks to send an artifact or file, attach one file up to
 agent-notify --topic "reports" --message "Report attached" --file "/absolute/path/to/report.pdf"
 ```
 
-Both plain text and Markdown are supported. Keep phone notifications concise and useful. A good completion message states the outcome first and may add a short Markdown list of essential results. Firebase data payloads are limited to roughly 4 KB, so link to or name a larger artifact instead of embedding it.
+Both plain text and Markdown are supported. The Android app renders CommonMark plus GFM tables, strikethrough, task lists and autolinks; raw HTML, footnotes and remote images are not rendered (see the README's "Supported Markdown" section). Keep phone notifications concise and useful. A good completion message states the outcome first and may add a short Markdown list of essential results. Firebase data payloads are limited to roughly 4 KB, so link to or name a larger artifact instead of embedding it.
 
 Use the user's exact topic when supplied. Otherwise choose a short, stable topic derived from the recurring task or workflow name so related messages group together; do not invent a new timestamped topic for every run.
 
