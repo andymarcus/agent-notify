@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
-import { configure, createSignedURL, encryptAttachment, fetchOrThrow, isConnectivityError, loadConfig, parseArguments, run } from "../src/agent-notify.js";
+import { configure, createSignedURL, encryptAttachment, fetchOrThrow, isConnectivityError, loadConfig, mimeType, parseArguments, run } from "../src/agent-notify.js";
 import { enqueueAndWait, listRequests, writeResult } from "../src/queue.js";
 import { installSkills, skillInstallTargets } from "../scripts/install-skills.js";
 
@@ -102,6 +102,10 @@ test("parses a file-only notification", () => {
     attachmentPath: file,
     dryRun: false,
   });
+});
+
+test("labels APK attachments for Android's package installer", () => {
+  assert.equal(mimeType("Agent-Notify.APK"), "application/vnd.android.package-archive");
 });
 
 test("encrypts attachments for the Android RSA key", () => {
@@ -217,6 +221,7 @@ test("copies queued attachments into the private worker queue", async () => {
     clearInterval(watcher);
     const request = JSON.parse(fs.readFileSync(requestPath, "utf8"));
     assert.notEqual(request.attachmentPath, source);
+    assert.equal(path.extname(request.attachmentPath), ".txt");
     assert.equal(fs.readFileSync(request.attachmentPath, "utf8"), "queued attachment");
     assert.equal(fs.statSync(request.attachmentPath).mode & 0o777, 0o600);
     fs.unlinkSync(request.attachmentPath);

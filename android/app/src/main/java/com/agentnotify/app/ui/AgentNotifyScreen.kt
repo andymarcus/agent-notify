@@ -77,6 +77,7 @@ fun AgentNotifyScreen(
     fileKeyProvider: () -> String,
     copyFileKey: (String) -> Unit,
     openAttachment: (String, String?) -> Unit,
+    downloadAttachment: (Long) -> Unit,
 ) {
     val messages by repository.messages.collectAsState()
     var selectedTopic by remember { mutableStateOf<String?>(null) }
@@ -156,7 +157,7 @@ fun AgentNotifyScreen(
                             },
                             onDeleteRequested = { pendingDeletion = message },
                             onMarkUnread = { repository.markUnread(message.id) },
-                            onDownload = { repository.downloadAttachment(message.id) },
+                            onDownload = { downloadAttachment(message.id) },
                             onOpenAttachment = { path, mime -> openAttachment(path, mime) },
                         )
                     }
@@ -384,6 +385,9 @@ private fun AttachmentCard(
         Column(Modifier.weight(1f)) {
             Text(message.attachmentName ?: "Attachment", fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Text(formatBytes(message.attachmentSize ?: 0), style = MaterialTheme.typography.labelSmall)
+            if (message.attachmentStatus == "ready") {
+                Text("Saved to Downloads", style = MaterialTheme.typography.labelSmall)
+            }
             message.attachmentError?.let { Text(it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelSmall, maxLines = 2) }
         }
         when (message.attachmentStatus) {

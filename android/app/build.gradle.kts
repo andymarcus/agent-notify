@@ -12,8 +12,8 @@ android {
         applicationId = "com.agentnotify.app"
         minSdk = 23
         targetSdk = 37
-        versionCode = 4
-        versionName = "1.2.1"
+        versionCode = 6
+        versionName = "1.2.3"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 

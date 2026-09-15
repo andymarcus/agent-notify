@@ -206,8 +206,8 @@ async function accessToken(account, fetch_, now) {
   return (await responseBody(response, "OAuth token request")).access_token;
 }
 
-function mimeType(fileName) {
-  const types = { ".pdf":"application/pdf", ".png":"image/png", ".jpg":"image/jpeg", ".jpeg":"image/jpeg", ".gif":"image/gif", ".webp":"image/webp", ".txt":"text/plain", ".md":"text/markdown", ".json":"application/json", ".csv":"text/csv", ".zip":"application/zip" };
+export function mimeType(fileName) {
+  const types = { ".apk":"application/vnd.android.package-archive", ".pdf":"application/pdf", ".png":"image/png", ".jpg":"image/jpeg", ".jpeg":"image/jpeg", ".gif":"image/gif", ".webp":"image/webp", ".txt":"text/plain", ".md":"text/markdown", ".json":"application/json", ".csv":"text/csv", ".zip":"application/zip" };
   return types[path.extname(fileName).toLowerCase()] ?? "application/octet-stream";
 }
 

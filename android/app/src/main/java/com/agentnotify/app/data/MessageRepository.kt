@@ -1,6 +1,10 @@
 package com.agentnotify.app.data
 
 import android.content.Context
+import android.content.ContentValues
+import android.os.Build
+import android.os.Environment
+import android.provider.MediaStore
 import com.agentnotify.app.crypto.AttachmentCrypto
 import java.io.File
 import java.net.HttpURLConnection
@@ -52,8 +56,8 @@ class MessageRepository(context: Context) {
     fun delete(id: Long) {
         val message = mutableMessages.value.firstOrNull { it.id == id }
         if (database.delete(id)) {
-            message?.attachmentId?.let { attachmentId ->
-                runCatching { File(appContext.filesDir, "attachments/$attachmentId").deleteRecursively() }
+            message?.attachmentPath?.takeUnless { it.startsWith("content:") }?.let { path ->
+                runCatching { File(path).parentFile?.deleteRecursively() }
             }
             mutableMessages.value = mutableMessages.value.filterNot { it.id == id }
         }
@@ -70,9 +74,8 @@ class MessageRepository(context: Context) {
                 val wrappedKey = requireNotNull(message.attachmentKey)
                 val iv = requireNotNull(message.attachmentIv)
                 val expectedHash = requireNotNull(message.attachmentSha256)
-                val directory = File(appContext.filesDir, "attachments/${message.attachmentId}").apply { mkdirs() }
+                val directory = File(appContext.cacheDir, "attachments/${message.attachmentId}").apply { mkdirs() }
                 val safeName = message.attachmentName.orEmpty().replace(Regex("[^A-Za-z0-9._ -]"), "_").ifBlank { "attachment" }
-                val destination = File(directory, safeName)
                 val temporaryFile = File(directory, ".download")
                 temporary = temporaryFile
                 val connection = URL(url).openConnection() as HttpURLConnection
@@ -92,9 +95,9 @@ class MessageRepository(context: Context) {
                     val actualHash = digest.digest().joinToString("") { "%02x".format(it) }
                     if (!actualHash.equals(expectedHash, ignoreCase = true)) error("File verification failed")
                     if (message.attachmentSize != null && temporaryFile.length() != message.attachmentSize) error("Downloaded file size did not match")
-                    if (destination.exists()) destination.delete()
-                    if (!temporaryFile.renameTo(destination)) error("Could not save downloaded file")
-                    setAttachmentState(id, "ready", destination.absolutePath)
+                    val downloadUri = saveToDownloads(temporaryFile, safeName, message.attachmentMime)
+                    temporaryFile.delete()
+                    setAttachmentState(id, "ready", downloadUri)
                 } finally {
                     connection.disconnect()
                 }
@@ -113,6 +116,40 @@ class MessageRepository(context: Context) {
                 if (it.id == id) it.copy(isRead = isRead) else it
             }
         }
+    }
+
+    private fun saveToDownloads(source: File, name: String, mime: String?): String {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val values = ContentValues().apply {
+                put(MediaStore.MediaColumns.DISPLAY_NAME, name)
+                put(MediaStore.MediaColumns.MIME_TYPE, mime ?: "application/octet-stream")
+                put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
+                put(MediaStore.MediaColumns.IS_PENDING, 1)
+            }
+            val resolver = appContext.contentResolver
+            val uri = requireNotNull(resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)) {
+                "Could not create file in Downloads"
+            }
+            try {
+                requireNotNull(resolver.openOutputStream(uri)) { "Could not write file in Downloads" }.use { output ->
+                    source.inputStream().use { input -> input.copyTo(output) }
+                }
+                resolver.update(uri, ContentValues().apply {
+                    put(MediaStore.MediaColumns.IS_PENDING, 0)
+                }, null, null)
+                return uri.toString()
+            } catch (error: Exception) {
+                resolver.delete(uri, null, null)
+                throw error
+            }
+        }
+
+        @Suppress("DEPRECATION")
+        val downloads = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+        if (!downloads.exists() && !downloads.mkdirs()) error("Could not create Downloads folder")
+        val destination = File(downloads, name)
+        source.copyTo(destination, overwrite = true)
+        return destination.absolutePath
     }
 
     @Synchronized
