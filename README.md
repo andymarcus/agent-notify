@@ -146,6 +146,25 @@ Install or upgrade it with ADB:
 
 Using `-r` upgrades the existing debug installation and preserves its messages and Android Keystore key when the signing key is unchanged.
 
+### Share the debug signing key between machines
+
+Android only allows an in-place upgrade when the new APK is signed with the same key as the installed app. Each machine has its own default debug keystore, so a build from a second machine would otherwise require an uninstall, which destroys stored messages and the attachment key.
+
+To build from more than one machine, copy the debug keystore from the machine that first installed the app to the same path on every other machine:
+
+```sh
+mkdir -p ~/.config/agent-notify
+cp ~/.android/debug.keystore ~/.config/agent-notify/debug.keystore
+chmod 600 ~/.config/agent-notify/debug.keystore
+```
+
+The Gradle build signs debug APKs with `~/.config/agent-notify/debug.keystore` when it exists (or the file named by `AGENT_NOTIFY_DEBUG_KEYSTORE`) and falls back to the default debug keystore otherwise. Verify a build matches the installed app by comparing certificate digests:
+
+```sh
+"$HOME/Library/Android/sdk/build-tools/36.1.0/apksigner" verify --print-certs \
+  android/app/build/outputs/apk/debug/app-debug.apk
+```
+
 ### Copy the pairing values
 
 Open the app and tap the Settings icon:
