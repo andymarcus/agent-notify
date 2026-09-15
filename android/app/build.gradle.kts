@@ -22,6 +22,22 @@ android {
         buildConfig = true
     }
 
+    // Debug builds are the installed distribution. Sign them with a shared keystore when
+    // one is present so builds from any machine can upgrade the app in place; otherwise
+    // fall back to the Android default debug keystore.
+    val sharedDebugKeystore = System.getenv("AGENT_NOTIFY_DEBUG_KEYSTORE")?.let(::File)
+        ?: File(System.getProperty("user.home"), ".config/agent-notify/debug.keystore")
+    if (sharedDebugKeystore.isFile) {
+        signingConfigs {
+            getByName("debug") {
+                storeFile = sharedDebugKeystore
+                storePassword = "android"
+                keyAlias = "androiddebugkey"
+                keyPassword = "android"
+            }
+        }
+    }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
