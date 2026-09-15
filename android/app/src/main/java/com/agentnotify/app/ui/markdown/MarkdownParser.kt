@@ -71,6 +71,32 @@ private fun fenceMarker(line: String): String? {
     return run
 }
 
+/**
+ * Strips leading block quote and list item markers so fences opened inside a
+ * container can be recognised. Returns the line unchanged when no container
+ * marker was found, so top level indentation rules still apply.
+ */
+private fun peelContainerMarkers(line: String): String {
+    var rest = line
+    var peeled = false
+    while (true) {
+        val trimmed = rest.trimStart()
+        if (trimmed.startsWith(">")) {
+            val afterMarker = trimmed.drop(1)
+            rest = if (afterMarker.startsWith(" ")) afterMarker.drop(1) else afterMarker
+            peeled = true
+            continue
+        }
+        val match = LIST_MARKER.matchEntire(trimmed)
+        if (match != null && (match.groupValues[5].isNotEmpty() || match.groupValues[6].isEmpty())) {
+            rest = match.groupValues[6]
+            peeled = true
+            continue
+        }
+        return if (peeled) trimmed else line
+    }
+}
+
 private fun closesFence(fence: String, line: String): Boolean {
     if (indentWidth(line) >= 4) return false
     val trimmed = line.trim()
@@ -249,9 +275,12 @@ private fun stripLinkDefinitions(
     var fence: String? = null
     var atBlockStart = true
     for (line in lines) {
-        val marker = fenceMarker(line)
+        // Fences may sit inside list items or block quotes; a definition-looking
+        // line inside such a fence is code and must not be stripped.
+        val fenceLine = peelContainerMarkers(line)
+        val marker = fenceMarker(fenceLine)
         if (fence != null) {
-            if (marker != null && closesFence(fence, line)) fence = null
+            if (marker != null && closesFence(fence, fenceLine)) fence = null
             kept.add(line)
             atBlockStart = false
             continue
@@ -287,13 +316,28 @@ private fun stripLinkDefinitions(
 
 private class BlockParser(private val inlines: InlineParser) {
 
-    fun parse(lines: List<String>): List<MarkdownBlock> {
+    /** Parsed blocks plus whether a blank line separated two of them (needed for list tightness). */
+    private class ParsedBlocks(val blocks: List<MarkdownBlock>, val blankBetweenBlocks: Boolean)
+
+    fun parse(lines: List<String>): List<MarkdownBlock> = parseBlocks(lines).blocks
+
+    private fun parseBlocks(lines: List<String>): ParsedBlocks {
         val blocks = mutableListOf<MarkdownBlock>()
+        var blankBetweenBlocks = false
+        var pendingBlank = false
         var i = 0
         while (i < lines.size) {
             val line = lines[i]
+            if (line.isBlank()) {
+                if (blocks.isNotEmpty()) pendingBlank = true
+                i++
+                continue
+            }
+            if (pendingBlank) {
+                blankBetweenBlocks = true
+                pendingBlank = false
+            }
             i = when {
-                line.isBlank() -> i + 1
                 fenceMarker(line) != null -> readFencedCode(lines, i, blocks)
                 isAtxHeading(line) -> readAtxHeading(lines, i, blocks)
                 isThematicBreak(line) -> {
@@ -307,7 +351,24 @@ private class BlockParser(private val inlines: InlineParser) {
                 else -> readParagraph(lines, i, blocks)
             }
         }
-        return blocks
+        return ParsedBlocks(blocks, blankBetweenBlocks)
+    }
+
+    /**
+     * Whether [lines] currently end in an open paragraph, possibly nested inside list
+     * items or block quotes. Only such a paragraph may take a lazy continuation line;
+     * headings, fences and other blocks may not.
+     */
+    private fun endsWithOpenParagraph(lines: List<String>): Boolean {
+        if (lines.lastOrNull()?.isNotBlank() != true) return false
+        return parse(lines).lastOrNull().endsWithParagraph()
+    }
+
+    private fun MarkdownBlock?.endsWithParagraph(): Boolean = when (this) {
+        is MarkdownBlock.Paragraph -> true
+        is MarkdownBlock.BlockQuote -> children.lastOrNull().endsWithParagraph()
+        is MarkdownBlock.ListBlock -> items.lastOrNull()?.children?.lastOrNull().endsWithParagraph()
+        else -> false
     }
 
     private fun readAtxHeading(lines: List<String>, start: Int, blocks: MutableList<MarkdownBlock>): Int {
@@ -370,7 +431,7 @@ private class BlockParser(private val inlines: InlineParser) {
                     i++
                 }
                 // Lazy continuation of a paragraph inside the quote.
-                line.isNotBlank() && inner.lastOrNull()?.isNotBlank() == true && !startsNewBlock(lines, i) -> {
+                line.isNotBlank() && !startsNewBlock(lines, i) && endsWithOpenParagraph(inner) -> {
                     inner.add(line.trimStart())
                     i++
                 }
@@ -413,25 +474,22 @@ private class BlockParser(private val inlines: InlineParser) {
         val first = listMarker(lines[start])!!
         val chunks = mutableListOf<MutableList<String>>()
         var contentIndent = first.contentIndent
-        var sawBlank = false
+        // A list is loose when a blank line separates two items, or two direct children
+        // of one item. Blank lines inside nested lists or code do not count.
+        var loose = false
         var i = start
         while (i < lines.size) {
             val line = lines[i]
             if (line.isBlank()) {
                 val nextIndex = (i + 1 until lines.size).firstOrNull { lines[it].isNotBlank() }
-                if (nextIndex == null) {
-                    i++
-                    break
-                }
+                // Leave a terminating blank line for the caller so the enclosing block
+                // parser can see it sits between two of its own blocks.
+                if (nextIndex == null) break
                 val next = lines[nextIndex]
                 val nextMarker = listMarker(next)
-                val continues = (nextMarker != null && nextMarker.indent < contentIndent && sameListType(first, nextMarker)) ||
-                    indentWidth(next) >= contentIndent
-                if (!continues) {
-                    i++
-                    break
-                }
-                sawBlank = true
+                val startsSibling = nextMarker != null && nextMarker.indent < contentIndent && sameListType(first, nextMarker)
+                if (!startsSibling && indentWidth(next) < contentIndent) break
+                if (startsSibling) loose = true
                 chunks.lastOrNull()?.add("")
                 i++
                 continue
@@ -449,7 +507,7 @@ private class BlockParser(private val inlines: InlineParser) {
                 i++
                 continue
             }
-            if (chunks.isNotEmpty() && chunks.last().lastOrNull()?.isNotBlank() == true && !startsNewBlock(lines, i)) {
+            if (chunks.isNotEmpty() && !startsNewBlock(lines, i) && endsWithOpenParagraph(chunks.last())) {
                 chunks.last().add(line.trimStart())
                 i++
                 continue
@@ -467,13 +525,15 @@ private class BlockParser(private val inlines: InlineParser) {
                     chunk[0] = chunk[0].substring(task.value.length)
                 }
             }
-            MarkdownListItem(checked, parse(chunk))
+            val parsed = parseBlocks(chunk)
+            if (parsed.blankBetweenBlocks) loose = true
+            MarkdownListItem(checked, parsed.blocks)
         }
         blocks.add(
             MarkdownBlock.ListBlock(
                 ordered = first.ordered,
                 start = if (first.ordered) first.start else 0,
-                tight = !sawBlank && items.all { it.children.size <= 1 },
+                tight = !loose,
                 items = items,
             ),
         )

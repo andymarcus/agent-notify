@@ -707,6 +707,165 @@ class MarkdownParserTest {
         assertTrue(blocks.all { it is MarkdownBlock.Paragraph })
     }
 
+    // -----------------------------------------------------------------------
+    // Regressions
+    // -----------------------------------------------------------------------
+
+    @Test
+    fun `nested list without blank lines keeps the parent tight`() {
+        val list = single(
+            """
+            - a
+              - b
+            - c
+            """,
+        ) as MarkdownBlock.ListBlock
+
+        assertTrue(list.tight)
+        assertTrue((list.items[0].children[1] as MarkdownBlock.ListBlock).tight)
+    }
+
+    @Test
+    fun `blank line inside a nested list only loosens the nested list`() {
+        val list = single(
+            """
+            - a
+              - b
+
+              - c
+            - d
+            """,
+        ) as MarkdownBlock.ListBlock
+
+        assertTrue(list.tight)
+        val nested = list.items[0].children[1] as MarkdownBlock.ListBlock
+        assertFalse(nested.tight)
+        assertEquals(listOf("b", "c"), nested.items.map { it.paragraphText() })
+    }
+
+    @Test
+    fun `blank line between a nested list and a following paragraph loosens the parent`() {
+        val list = single(
+            """
+            - a
+              - b
+
+              after
+            - c
+            """,
+        ) as MarkdownBlock.ListBlock
+
+        assertFalse(list.tight)
+        val children = list.items[0].children
+        assertEquals(3, children.size)
+        assertTrue((children[1] as MarkdownBlock.ListBlock).tight)
+        assertEquals("after", (children[2] as MarkdownBlock.Paragraph).content.plainText())
+        assertEquals("c", list.items[1].paragraphText())
+    }
+
+    @Test
+    fun `lazy continuation does not extend a quoted heading`() {
+        val blocks = parse(
+            """
+            > # Title
+            outside
+            """,
+        )
+
+        assertEquals(2, blocks.size)
+        val quote = blocks[0] as MarkdownBlock.BlockQuote
+        assertEquals("Title", (quote.children.single() as MarkdownBlock.Heading).content.plainText())
+        assertEquals("outside", (blocks[1] as MarkdownBlock.Paragraph).content.plainText())
+    }
+
+    @Test
+    fun `lazy continuation does not extend a quoted fence`() {
+        val blocks = parse(
+            """
+            > ```
+            outside
+            """,
+        )
+
+        assertEquals(2, blocks.size)
+        val quote = blocks[0] as MarkdownBlock.BlockQuote
+        assertTrue(quote.children.single() is MarkdownBlock.CodeBlock)
+        assertEquals("outside", (blocks[1] as MarkdownBlock.Paragraph).content.plainText())
+    }
+
+    @Test
+    fun `lazy continuation still reaches a paragraph nested in a quoted list`() {
+        val quote = single(
+            """
+            > - item
+            continued
+            """,
+        ) as MarkdownBlock.BlockQuote
+
+        val list = quote.children.single() as MarkdownBlock.ListBlock
+        assertEquals("item continued", list.items.single().paragraphText())
+    }
+
+    @Test
+    fun `lazy continuation does not extend a fence inside a list item`() {
+        val blocks = parse(
+            """
+            - ```
+            outside
+            """,
+        )
+
+        assertEquals(2, blocks.size)
+        val list = blocks[0] as MarkdownBlock.ListBlock
+        assertTrue(list.items.single().children.single() is MarkdownBlock.CodeBlock)
+        assertEquals("outside", (blocks[1] as MarkdownBlock.Paragraph).content.plainText())
+    }
+
+    @Test
+    fun `link definition inside a fence in a list item is kept as code`() {
+        val blocks = parse(
+            """
+            - ```
+              code
+
+              [x]: not-a-definition
+              ```
+
+            [x]: https://example.com
+
+            [x]
+            """,
+        )
+
+        val list = blocks[0] as MarkdownBlock.ListBlock
+        val code = list.items.single().children.single() as MarkdownBlock.CodeBlock
+        assertEquals("code\n\n[x]: not-a-definition", code.code)
+        val link = (blocks[1] as MarkdownBlock.Paragraph).content.single() as MarkdownInline.Link
+        assertEquals("https://example.com", link.destination)
+    }
+
+    @Test
+    fun `link definition inside a fence in a block quote is kept as code`() {
+        val blocks = parse(
+            """
+            > ```
+            >
+            > [x]: not-a-definition
+            > ```
+
+            [x]: https://example.com
+
+            [x]
+            """,
+        )
+
+        val quote = blocks[0] as MarkdownBlock.BlockQuote
+        val code = quote.children.single() as MarkdownBlock.CodeBlock
+        assertEquals("\n[x]: not-a-definition", code.code)
+        val link = (blocks[1] as MarkdownBlock.Paragraph).content.single() as MarkdownInline.Link
+        assertEquals("https://example.com", link.destination)
+    }
+
     private fun MarkdownListItem.paragraphText(): String =
         (children.first() as MarkdownBlock.Paragraph).content.plainText()
 }
