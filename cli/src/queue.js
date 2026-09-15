@@ -24,7 +24,7 @@ export async function enqueueAndWait(topic, body, options = {}) {
   const resultPath = path.join(directory, `${id}.result.json`);
   let queuedAttachmentPath;
   if (options.attachmentPath) {
-    queuedAttachmentPath = path.join(directory, `${id}.attachment`);
+    queuedAttachmentPath = path.join(directory, `${id}-${path.basename(options.attachmentPath)}`);
     fs.copyFileSync(options.attachmentPath, queuedAttachmentPath);
     fs.chmodSync(queuedAttachmentPath, 0o600);
   }

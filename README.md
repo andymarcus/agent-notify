@@ -43,10 +43,10 @@ For an attachment:
 4. The AES key is wrapped to the Android public key with RSA-OAEP.
 5. Only ciphertext is uploaded to the private Firebase Storage bucket.
 6. FCM carries the message, attachment metadata, wrapped key, checksum, and a seven-day signed download URL.
-7. Android downloads only after **Download** is tapped, decrypts locally, verifies SHA-256 and file size, and stores the result in private app storage.
-8. Deleting the Android message also deletes its downloaded file.
+7. Android downloads only after **Download** is tapped, decrypts locally, verifies SHA-256 and file size, then saves the result in the device's Downloads folder.
+8. Deleting the Android message leaves the downloaded file in Downloads for the user to manage.
 
-The configured bucket lifecycle deletes objects under `agent-notify/` after seven days. Downloaded Android copies remain until their message is deleted or the app is removed.
+The configured bucket lifecycle deletes objects under `agent-notify/` after seven days. Downloaded Android copies live in the device's Downloads folder and remain until the user removes them.
 
 ## Requirements
 
@@ -389,9 +389,9 @@ The service-account JSON, FCM token, and local CLI config are intentionally abse
 - Swipe left to mark the message unread.
 - Tap **Download** to retrieve and decrypt an attachment.
 - Tap **Retry** after a recoverable failure.
-- Tap **Open** to use an Android app associated with the attachment MIME type.
+- Tap **Open** to view Markdown (`.md` and `.markdown`) files directly in Agent Notify. Other file types open in an Android app associated with their MIME type.
 
-Messages and downloaded attachments remain available offline. Attachment offers whose signed links have expired cannot be downloaded again; resend the attachment from the CLI.
+Messages remain available offline. Downloaded attachments are saved to the device's standard Downloads folder and remain there if their message is deleted. Attachment offers whose signed links have expired cannot be downloaded again; resend the attachment from the CLI.
 
 ## Testing
 
@@ -473,7 +473,7 @@ Attachments sent for an older private key cannot be decrypted and must be resent
 - The AES key is RSA-OAEP wrapped for the phone before transmission.
 - Android keeps its RSA private key in Android Keystore.
 - SHA-256 and expected size are checked before a download becomes available.
-- Downloaded files live in app-private storage and are exposed to another Android app only through a temporary `FileProvider` grant when opened.
+- Downloaded files are saved to the device's standard Downloads folder, where the user can manage them in Files or My Files.
 - The Storage lifecycle rule deletes encrypted cloud objects after seven days.
 - A leaked signed URL exposes only ciphertext, but service-account credentials and FCM tokens must still be protected.
 
