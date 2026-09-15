@@ -56,9 +56,11 @@ class MessageRepository(context: Context) {
     fun delete(id: Long) {
         val message = mutableMessages.value.firstOrNull { it.id == id }
         if (database.delete(id)) {
-            message?.attachmentPath?.takeUnless { it.startsWith("content:") }?.let { path ->
-                runCatching { File(path).parentFile?.deleteRecursively() }
-            }
+            // Only remove files the app stored privately (downloads from older versions).
+            // Files saved to the public Downloads folder are left for the user to manage.
+            message?.attachmentPath?.takeUnless { it.startsWith("content:") }?.let(::File)
+                ?.takeIf(::isInPrivateStorage)
+                ?.let { file -> runCatching { file.parentFile?.deleteRecursively() } }
             mutableMessages.value = mutableMessages.value.filterNot { it.id == id }
         }
     }
@@ -115,6 +117,14 @@ class MessageRepository(context: Context) {
             mutableMessages.value = mutableMessages.value.map {
                 if (it.id == id) it.copy(isRead = isRead) else it
             }
+        }
+    }
+
+    private fun isInPrivateStorage(file: File): Boolean {
+        val path = runCatching { file.canonicalPath }.getOrNull() ?: return false
+        return listOf(appContext.filesDir, appContext.cacheDir).any { root ->
+            val rootPath = runCatching { root.canonicalPath }.getOrNull() ?: return@any false
+            path.startsWith(rootPath + File.separator)
         }
     }
 

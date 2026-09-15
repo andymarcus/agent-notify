@@ -46,7 +46,7 @@ For an attachment:
 7. Android downloads only after **Download** is tapped, decrypts locally, verifies SHA-256 and file size, then saves the result in the device's Downloads folder.
 8. Deleting the Android message leaves the downloaded file in Downloads for the user to manage.
 
-The configured bucket lifecycle deletes objects under `agent-notify/` after seven days. Downloaded Android copies remain until their message is deleted or the app is removed.
+The configured bucket lifecycle deletes objects under `agent-notify/` after seven days. Downloaded Android copies live in the device's Downloads folder and remain until the user removes them.
 
 ## Requirements
 
