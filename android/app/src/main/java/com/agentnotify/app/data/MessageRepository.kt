@@ -13,6 +13,8 @@ import java.security.DigestOutputStream
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -56,6 +58,7 @@ class MessageRepository(context: Context) {
     fun delete(id: Long) {
         val message = mutableMessages.value.firstOrNull { it.id == id }
         if (database.delete(id)) {
+            AttachmentDownloadWorker.cancel(appContext, id)
             // Only remove files the app stored privately (downloads from older versions).
             // Files saved to the public Downloads folder are left for the user to manage.
             message?.attachmentPath?.takeUnless { it.startsWith("content:") }?.let(::File)
@@ -67,46 +70,80 @@ class MessageRepository(context: Context) {
 
     fun downloadAttachment(id: Long) {
         val message = mutableMessages.value.firstOrNull { it.id == id } ?: return
-        if (message.attachmentId == null || message.attachmentStatus == "downloading") return
+        if (message.attachmentId == null) return
         setAttachmentState(id, "downloading")
-        scope.launch {
-            var temporary: File? = null
+        AttachmentDownloadWorker.enqueue(appContext, id)
+    }
+
+    fun find(id: Long): AgentMessage? = mutableMessages.value.firstOrNull { it.id == id }
+
+    /**
+     * Downloads, decrypts and verifies an attachment, then saves it to Downloads.
+     * Runs inside [AttachmentDownloadWorker]; the worker owns retries and failure state.
+     */
+    suspend fun fetchAttachment(id: Long, onProgress: suspend (bytesWritten: Long) -> Unit) {
+        val message = requireNotNull(find(id)) { "Message no longer exists" }
+        val url = requireNotNull(message.attachmentUrl)
+        val wrappedKey = requireNotNull(message.attachmentKey)
+        val iv = requireNotNull(message.attachmentIv)
+        val expectedHash = requireNotNull(message.attachmentSha256)
+        val directory = File(appContext.cacheDir, "attachments/${message.attachmentId}").apply { mkdirs() }
+        val safeName = message.attachmentName.orEmpty().replace(Regex("[^A-Za-z0-9._ -]"), "_").ifBlank { "attachment" }
+        val temporaryFile = File(directory, ".download")
+        try {
+            val connection = URL(url).openConnection() as HttpURLConnection
+            connection.connectTimeout = 20_000
+            connection.readTimeout = 60_000
+            connection.instanceFollowRedirects = true
             try {
-                val url = requireNotNull(message.attachmentUrl)
-                val wrappedKey = requireNotNull(message.attachmentKey)
-                val iv = requireNotNull(message.attachmentIv)
-                val expectedHash = requireNotNull(message.attachmentSha256)
-                val directory = File(appContext.cacheDir, "attachments/${message.attachmentId}").apply { mkdirs() }
-                val safeName = message.attachmentName.orEmpty().replace(Regex("[^A-Za-z0-9._ -]"), "_").ifBlank { "attachment" }
-                val temporaryFile = File(directory, ".download")
-                temporary = temporaryFile
-                val connection = URL(url).openConnection() as HttpURLConnection
-                connection.connectTimeout = 20_000
-                connection.readTimeout = 60_000
-                connection.instanceFollowRedirects = true
-                try {
-                    if (connection.responseCode !in 200..299) error("Download failed (HTTP ${connection.responseCode})")
-                    val digest = AttachmentCrypto.sha256()
-                    connection.inputStream.use { input ->
-                        AttachmentCrypto.decryptingStream(input, wrappedKey, iv).use { decrypted ->
-                            temporaryFile.outputStream().use { output ->
-                                DigestOutputStream(output, digest).use { verified -> decrypted.copyTo(verified) }
+                if (connection.responseCode !in 200..299) error("Download failed (HTTP ${connection.responseCode})")
+                val digest = AttachmentCrypto.sha256()
+                connection.inputStream.use { input ->
+                    AttachmentCrypto.decryptingStream(input, wrappedKey, iv).use { decrypted ->
+                        temporaryFile.outputStream().use { output ->
+                            DigestOutputStream(output, digest).use { verified ->
+                                val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
+                                var written = 0L
+                                while (true) {
+                                    currentCoroutineContext().ensureActive()
+                                    val read = decrypted.read(buffer)
+                                    if (read < 0) break
+                                    verified.write(buffer, 0, read)
+                                    written += read
+                                    onProgress(written)
+                                }
                             }
                         }
                     }
-                    val actualHash = digest.digest().joinToString("") { "%02x".format(it) }
-                    if (!actualHash.equals(expectedHash, ignoreCase = true)) error("File verification failed")
-                    if (message.attachmentSize != null && temporaryFile.length() != message.attachmentSize) error("Downloaded file size did not match")
-                    val downloadUri = saveToDownloads(temporaryFile, safeName, message.attachmentMime)
-                    temporaryFile.delete()
-                    setAttachmentState(id, "ready", downloadUri)
-                } finally {
-                    connection.disconnect()
                 }
-            } catch (error: Exception) {
-                temporary?.delete()
-                setAttachmentState(id, "failed", error = error.message ?: "Download failed")
+                val actualHash = digest.digest().joinToString("") { "%02x".format(it) }
+                if (!actualHash.equals(expectedHash, ignoreCase = true)) throw AttachmentVerificationException("File verification failed")
+                if (message.attachmentSize != null && temporaryFile.length() != message.attachmentSize) {
+                    throw AttachmentVerificationException("Downloaded file size did not match")
+                }
+                val downloadUri = saveToDownloads(temporaryFile, safeName, message.attachmentMime)
+                setAttachmentState(id, "ready", downloadUri)
+            } finally {
+                connection.disconnect()
             }
+        } finally {
+            temporaryFile.delete()
+        }
+    }
+
+    fun markDownloadFailed(id: Long, error: String) = setAttachmentState(id, "failed", error = error)
+
+    /**
+     * Clears a "downloading" state left behind when no download work is pending,
+     * e.g. after the app was killed by a version that ran downloads in-process.
+     */
+    fun recoverInterruptedDownloads() {
+        val candidates = mutableMessages.value.filter { it.attachmentStatus == "downloading" }.map { it.id }
+        if (candidates.isEmpty()) return
+        scope.launch {
+            candidates
+                .filterNot { AttachmentDownloadWorker.isPending(appContext, it) }
+                .forEach { markDownloadFailed(it, "Download was interrupted") }
         }
     }
 
@@ -176,3 +213,5 @@ class MessageRepository(context: Context) {
         mutableMessages.value = database.all()
     }
 }
+
+class AttachmentVerificationException(message: String) : Exception(message)

@@ -11,6 +11,7 @@ class AgentNotifyApplication : Application() {
         super.onCreate()
         Notifications.createChannel(this)
         repository.refresh()
+        repository.recoverInterruptedDownloads()
     }
 }
 
