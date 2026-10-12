@@ -17,7 +17,9 @@ Agent Notify sends topic-grouped text, Markdown, and encrypted file attachments 
 
 - Displays system notifications for incoming messages.
 - Keeps message history in a private SQLite database.
-- Filters messages by topic.
+- Lists topics in a swipe-open side drawer, starting with "All Messages".
+- Filters the list to All or Unread Only.
+- Deletes all read messages in the current view with "Delete Read".
 - Tracks read and unread messages.
 - Expands and collapses long messages.
 - Copies a message with a long press.
@@ -401,6 +403,9 @@ The service-account JSON, FCM token, and local CLI config are intentionally abse
 
 ## Android usage
 
+- Swipe right from the header (or tap the menu icon) to open the topic drawer. Pick **All Messages** or a single topic.
+- Use **All** / **Unread Only** to filter the list.
+- Tap **Delete Read** and confirm to delete every read message in the current topic (or all topics under **All Messages**).
 - Tap a message to mark it read.
 - Tap a long message to expand or collapse it.
 - Press and hold a message to copy the full body.

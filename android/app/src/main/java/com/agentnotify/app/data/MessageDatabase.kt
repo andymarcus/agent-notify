@@ -131,6 +131,22 @@ class MessageDatabase(context: Context) :
     fun delete(id: Long): Boolean =
         writableDatabase.delete("messages", "id = ?", arrayOf(id.toString())) > 0
 
+    /** Deletes the given messages in one transaction and returns the ids that were removed. */
+    fun deleteAll(ids: Collection<Long>): Set<Long> {
+        val db = writableDatabase
+        val deleted = mutableSetOf<Long>()
+        db.beginTransaction()
+        try {
+            ids.forEach { id ->
+                if (db.delete("messages", "id = ?", arrayOf(id.toString())) > 0) deleted += id
+            }
+            db.setTransactionSuccessful()
+        } finally {
+            db.endTransaction()
+        }
+        return deleted
+    }
+
     companion object {
         private const val DATABASE_VERSION = 3
     }
