@@ -58,14 +58,32 @@ class MessageRepository(context: Context) {
     fun delete(id: Long) {
         val message = mutableMessages.value.firstOrNull { it.id == id }
         if (database.delete(id)) {
-            AttachmentDownloadWorker.cancel(appContext, id)
-            // Only remove files the app stored privately (downloads from older versions).
-            // Files saved to the public Downloads folder are left for the user to manage.
-            message?.attachmentPath?.takeUnless { it.startsWith("content:") }?.let(::File)
-                ?.takeIf(::isInPrivateStorage)
-                ?.let { file -> runCatching { file.parentFile?.deleteRecursively() } }
+            cleanUpDeleted(id, message)
             mutableMessages.value = mutableMessages.value.filterNot { it.id == id }
         }
+    }
+
+    /**
+     * Deletes every read message, limited to [topic] when one is given.
+     * Returns the number of messages removed.
+     */
+    @Synchronized
+    fun deleteRead(topic: String? = null): Int {
+        val candidates = mutableMessages.value.filter { it.isRead && (topic == null || it.topic == topic) }
+        if (candidates.isEmpty()) return 0
+        val deleted = database.deleteAll(candidates.map { it.id })
+        candidates.filter { it.id in deleted }.forEach { cleanUpDeleted(it.id, it) }
+        mutableMessages.value = mutableMessages.value.filterNot { it.id in deleted }
+        return deleted.size
+    }
+
+    private fun cleanUpDeleted(id: Long, message: AgentMessage?) {
+        AttachmentDownloadWorker.cancel(appContext, id)
+        // Only remove files the app stored privately (downloads from older versions).
+        // Files saved to the public Downloads folder are left for the user to manage.
+        message?.attachmentPath?.takeUnless { it.startsWith("content:") }?.let(::File)
+            ?.takeIf(::isInPrivateStorage)
+            ?.let { file -> runCatching { file.parentFile?.deleteRecursively() } }
     }
 
     fun downloadAttachment(id: Long) {

@@ -4,6 +4,26 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
+import androidx.compose.material.icons.automirrored.outlined.Label
+import androidx.compose.material.icons.outlined.DeleteSweep
+import androidx.compose.material.icons.outlined.DoneAll
+import androidx.compose.material.icons.outlined.Inbox
+import androidx.compose.material.icons.outlined.Menu
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.DrawerValue
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.ModalDrawerSheet
+import androidx.compose.material3.ModalNavigationDrawer
+import androidx.compose.material3.NavigationDrawerItem
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
+import androidx.compose.material3.rememberDrawerState
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
+import kotlinx.coroutines.launch
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.combinedClickable
@@ -19,7 +39,6 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.ContentCopy
@@ -34,7 +53,6 @@ import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Card
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -80,86 +98,128 @@ fun AgentNotifyScreen(
     downloadAttachment: (Long) -> Unit,
 ) {
     val messages by repository.messages.collectAsState()
-    var selectedTopic by remember { mutableStateOf<String?>(null) }
+    var selectedTopic by rememberSaveable { mutableStateOf<String?>(null) }
+    var unreadOnly by rememberSaveable { mutableStateOf(false) }
     var showSettings by remember { mutableStateOf(false) }
     var expandedMessageIds by remember { mutableStateOf(emptySet<Long>()) }
     var pendingDeletion by remember { mutableStateOf<AgentMessage?>(null) }
+    var confirmDeleteRead by remember { mutableStateOf(false) }
+    // Messages read while viewing "Unread Only" stay visible until the view changes,
+    // so tapping a message to read or expand it does not make it vanish mid-read.
+    var keptVisibleIds by remember(selectedTopic, unreadOnly) { mutableStateOf(emptySet<Long>()) }
+    val drawerState = rememberDrawerState(DrawerValue.Closed)
+    val scope = rememberCoroutineScope()
     val context = LocalContext.current
-    val topics = remember(messages) { messages.map { it.topic }.distinct().sortedBy { it.lowercase() } }
-    val filtered = remember(messages, selectedTopic) {
+
+    val topics = remember(messages) {
+        messages.groupBy { it.topic }
+            .map { (topic, items) -> TopicSummary(topic, items.count { !it.isRead }) }
+            .sortedBy { it.name.lowercase() }
+    }
+    // Fall back to all messages when the selected topic no longer has any messages.
+    LaunchedEffect(topics, selectedTopic) {
+        if (selectedTopic != null && topics.none { it.name == selectedTopic }) selectedTopic = null
+    }
+    val inTopic = remember(messages, selectedTopic) {
         selectedTopic?.let { topic -> messages.filter { it.topic == topic } } ?: messages
     }
+    val visible = remember(inTopic, unreadOnly, keptVisibleIds) {
+        if (unreadOnly) inTopic.filter { !it.isRead || it.id in keptVisibleIds } else inTopic
+    }
+    val unreadInTopic = inTopic.count { !it.isRead }
+    val readInTopic = inTopic.size - unreadInTopic
 
-    Scaffold(
-        topBar = {
-            TopAppBar(
-                title = {
-                    Column {
-                        Text("Agent Notify", fontWeight = FontWeight.Bold)
-                        Text("${messages.size} saved messages", style = MaterialTheme.typography.labelMedium)
-                    }
-                },
-                actions = {
-                    IconButton(onClick = { showSettings = true }) {
-                        Icon(Icons.Outlined.Settings, contentDescription = "Settings")
-                    }
+    BackHandler(enabled = drawerState.isOpen) { scope.launch { drawerState.close() } }
+
+    ModalNavigationDrawer(
+        drawerState = drawerState,
+        drawerContent = {
+            TopicDrawer(
+                totalUnread = messages.count { !it.isRead },
+                topics = topics,
+                selectedTopic = selectedTopic,
+                onSelect = { topic ->
+                    selectedTopic = topic
+                    scope.launch { drawerState.close() }
                 },
             )
-        }
-    ) { padding ->
-        Column(Modifier.fillMaxSize().padding(padding)) {
-            LazyRow(
-                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                item {
-                    FilterChip(
-                        selected = selectedTopic == null,
-                        onClick = { selectedTopic = null },
-                        label = { Text("All") },
-                    )
-                }
-                items(topics) { topic ->
-                    FilterChip(
-                        selected = selectedTopic == topic,
-                        onClick = { selectedTopic = topic },
-                        label = { Text(topic) },
-                    )
-                }
+        },
+    ) {
+        Scaffold(
+            topBar = {
+                TopAppBar(
+                    navigationIcon = {
+                        IconButton(onClick = { scope.launch { drawerState.open() } }) {
+                            Icon(Icons.Outlined.Menu, contentDescription = "Topics")
+                        }
+                    },
+                    title = {
+                        Column {
+                            Text(
+                                selectedTopic ?: "All Messages",
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            Text(
+                                "${inTopic.size} saved · $unreadInTopic unread",
+                                style = MaterialTheme.typography.labelMedium,
+                            )
+                        }
+                    },
+                    actions = {
+                        IconButton(onClick = { showSettings = true }) {
+                            Icon(Icons.Outlined.Settings, contentDescription = "Settings")
+                        }
+                    },
+                )
             }
+        ) { padding ->
+            Column(Modifier.fillMaxSize().padding(padding)) {
+                FilterBar(
+                    unreadOnly = unreadOnly,
+                    onUnreadOnlyChange = { unreadOnly = it },
+                    canDeleteRead = readInTopic > 0,
+                    onDeleteRead = { confirmDeleteRead = true },
+                )
 
-            if (filtered.isEmpty()) {
-                EmptyState(Modifier.fillMaxSize())
-            } else {
-                LazyColumn(
-                    modifier = Modifier.fillMaxSize(),
-                    contentPadding = PaddingValues(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                ) {
-                    items(filtered, key = { it.id }) { message ->
-                        SwipeableMessage(
-                            message = message,
-                            isExpanded = message.id in expandedMessageIds,
-                            onClick = {
-                                repository.markRead(message.id)
-                                if (isLongMessage(message.body)) {
-                                    expandedMessageIds = if (message.id in expandedMessageIds) {
-                                        expandedMessageIds - message.id
-                                    } else {
-                                        expandedMessageIds + message.id
+                if (visible.isEmpty()) {
+                    EmptyState(
+                        modifier = Modifier.fillMaxSize(),
+                        caughtUp = unreadOnly && inTopic.isNotEmpty(),
+                    )
+                } else {
+                    LazyColumn(
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 16.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        items(visible, key = { it.id }) { message ->
+                            SwipeableMessage(
+                                message = message,
+                                isExpanded = message.id in expandedMessageIds,
+                                onClick = {
+                                    if (unreadOnly && !message.isRead) keptVisibleIds = keptVisibleIds + message.id
+                                    repository.markRead(message.id)
+                                    if (isLongMessage(message.body)) {
+                                        expandedMessageIds = if (message.id in expandedMessageIds) {
+                                            expandedMessageIds - message.id
+                                        } else {
+                                            expandedMessageIds + message.id
+                                        }
                                     }
-                                }
-                            },
-                            onLongClick = {
-                                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                clipboard.setPrimaryClip(ClipData.newPlainText(message.topic, message.body))
-                                Toast.makeText(context, "Message copied", Toast.LENGTH_SHORT).show()
-                            },
-                            onDeleteRequested = { pendingDeletion = message },
-                            onMarkUnread = { repository.markUnread(message.id) },
-                            onDownload = { downloadAttachment(message.id) },
-                            onOpenAttachment = { path, mime -> openAttachment(path, mime) },
-                        )
+                                },
+                                onLongClick = {
+                                    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                    clipboard.setPrimaryClip(ClipData.newPlainText(message.topic, message.body))
+                                    Toast.makeText(context, "Message copied", Toast.LENGTH_SHORT).show()
+                                },
+                                onDeleteRequested = { pendingDeletion = message },
+                                onMarkUnread = { repository.markUnread(message.id) },
+                                onDownload = { downloadAttachment(message.id) },
+                                onOpenAttachment = { path, mime -> openAttachment(path, mime) },
+                            )
+                        }
                     }
                 }
             }
@@ -229,15 +289,162 @@ fun AgentNotifyScreen(
             },
         )
     }
+
+    if (confirmDeleteRead) {
+        val scopeLabel = selectedTopic?.let { "in “$it”" } ?: "across all topics"
+        AlertDialog(
+            onDismissRequest = { confirmDeleteRead = false },
+            title = { Text("Delete read messages?") },
+            text = {
+                Text(
+                    "This will permanently delete $readInTopic read " +
+                        "${if (readInTopic == 1) "message" else "messages"} $scopeLabel. Unread messages are kept."
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        val removed = repository.deleteRead(selectedTopic)
+                        val remainingIds = repository.messages.value.mapTo(HashSet()) { it.id }
+                        expandedMessageIds = expandedMessageIds.filterTo(HashSet()) { it in remainingIds }
+                        confirmDeleteRead = false
+                        Toast.makeText(
+                            context,
+                            "Deleted $removed ${if (removed == 1) "message" else "messages"}",
+                            Toast.LENGTH_SHORT,
+                        ).show()
+                    }
+                ) {
+                    Text("Delete", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { confirmDeleteRead = false }) { Text("Cancel") }
+            },
+        )
+    }
+}
+
+private data class TopicSummary(val name: String, val unread: Int)
+
+@Composable
+private fun TopicDrawer(
+    totalUnread: Int,
+    topics: List<TopicSummary>,
+    selectedTopic: String?,
+    onSelect: (String?) -> Unit,
+) {
+    ModalDrawerSheet {
+        LazyColumn(contentPadding = PaddingValues(horizontal = 12.dp, vertical = 12.dp)) {
+            item {
+                Text(
+                    "Agent Notify",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                    modifier = Modifier.padding(start = 16.dp, top = 8.dp, bottom = 16.dp),
+                )
+            }
+            item {
+                NavigationDrawerItem(
+                    label = { Text("All Messages", fontWeight = FontWeight.SemiBold) },
+                    icon = { Icon(Icons.Outlined.Inbox, contentDescription = null) },
+                    badge = { UnreadBadge(totalUnread) },
+                    selected = selectedTopic == null,
+                    onClick = { onSelect(null) },
+                )
+            }
+            if (topics.isNotEmpty()) {
+                item {
+                    HorizontalDivider(Modifier.padding(horizontal = 16.dp, vertical = 12.dp))
+                    Text(
+                        "Topics",
+                        style = MaterialTheme.typography.titleSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(start = 16.dp, bottom = 8.dp),
+                    )
+                }
+            }
+            items(topics, key = { it.name }) { topic ->
+                NavigationDrawerItem(
+                    label = { Text(topic.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                    icon = { Icon(Icons.AutoMirrored.Outlined.Label, contentDescription = null) },
+                    badge = { UnreadBadge(topic.unread) },
+                    selected = selectedTopic == topic.name,
+                    onClick = { onSelect(topic.name) },
+                )
+            }
+        }
+    }
 }
 
 @Composable
-private fun EmptyState(modifier: Modifier = Modifier) {
+private fun UnreadBadge(count: Int) {
+    if (count > 0) {
+        Text(
+            if (count > 99) "99+" else count.toString(),
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.primary,
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun FilterBar(
+    unreadOnly: Boolean,
+    onUnreadOnlyChange: (Boolean) -> Unit,
+    canDeleteRead: Boolean,
+    onDeleteRead: () -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        SingleChoiceSegmentedButtonRow(Modifier.weight(1f)) {
+            SegmentedButton(
+                selected = !unreadOnly,
+                onClick = { onUnreadOnlyChange(false) },
+                shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2),
+            ) { Text("All", maxLines = 1) }
+            SegmentedButton(
+                selected = unreadOnly,
+                onClick = { onUnreadOnlyChange(true) },
+                shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2),
+            ) { Text("Unread Only", maxLines = 1) }
+        }
+        OutlinedButton(
+            onClick = onDeleteRead,
+            enabled = canDeleteRead,
+            contentPadding = PaddingValues(horizontal = 14.dp),
+            colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error),
+        ) {
+            Icon(Icons.Outlined.DeleteSweep, contentDescription = null, modifier = Modifier.size(18.dp))
+            Spacer(Modifier.size(6.dp))
+            Text("Delete Read", maxLines = 1)
+        }
+    }
+}
+
+@Composable
+private fun EmptyState(modifier: Modifier = Modifier, caughtUp: Boolean = false) {
     Column(modifier.padding(32.dp), verticalArrangement = Arrangement.Center) {
-        Icon(Icons.Outlined.Notifications, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+        Icon(
+            if (caughtUp) Icons.Outlined.DoneAll else Icons.Outlined.Notifications,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.primary,
+        )
         Spacer(Modifier.height(12.dp))
-        Text("No messages yet", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-        Text("Messages sent from the CLI will appear here and stay available offline.")
+        Text(
+            if (caughtUp) "All caught up" else "No messages yet",
+            style = MaterialTheme.typography.headlineSmall,
+            fontWeight = FontWeight.Bold,
+        )
+        Text(
+            if (caughtUp) "There are no unread messages here."
+            else "Messages sent from the CLI will appear here and stay available offline."
+        )
     }
 }
 
